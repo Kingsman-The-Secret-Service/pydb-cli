@@ -1,5 +1,4 @@
-import MySQLdb, json, logging
-
+import sys, MySQLdb, json, logging
 
 class Database(object):
 
@@ -11,20 +10,12 @@ class Database(object):
     __session    = None
     __connection = None
     
-    def __init__(self, filename = None, 
-                        hostname = None, 
-                        dbname = None, 
-                        username = None, 
-                        password = None, 
-                        port =3306):
+    def __init__(self, hostname = None, 
+                       dbname = None, 
+                       username = None, 
+                       password = None, 
+                       port =3306):
         
-        if filename: // TODO
-            data = FileReader(filename)['db_info']
-            self.hostname = data["hostname"]
-            self.dbname = data["dbname"]
-            self.username = data["username"]
-            self.password = data["password"]
-        else:
             self.hostname = hostname
             self.dbname = dbname
             self.username = username
@@ -46,6 +37,7 @@ class Database(object):
 
     def rawQuery(self, sql):
 
+        status = False
         logging.info(sql)
 
         self.__open()
@@ -56,11 +48,20 @@ class Database(object):
             self.__connection.rollback()
         else:
             self.__connection.commit()
+            status = True
         finally:
             self.__close()
+        
+        return {
+                'commit' : status, 
+                'rowcount' : self.__session.rowcount,
+                'lastrowid' : self.__session.lastrowid
+        }
+
 
     def insert(self, tablename, **kwargs):
 
+        insertRowId = None
         values = None
         query = "INSERT INTO %s" % tablename
 
@@ -79,9 +80,43 @@ class Database(object):
             self.__connection.rollback()
         else:
             self.__connection.commit()
+            insertRowId = self.__session.lastrowid
         finally:
             self.__close()
 
+        return insertRowId
+
+    def update(self, tablename, where=None, **kwargs):
+
+        values = None
+        query  = "UPDATE %s SET " % tablename
+
+        if kwargs:
+            columns = kwargs.keys()
+            values = kwargs.values()
+            temp = [ "`"+key+"` = %s" for i, key in enumerate(columns) ]
+            query += ",".join(temp)
+        
+        if where:
+            query += " WHERE %s" % where
+        else:
+            logging.critical("MySQL update requires WHERE clause")
+
+        logging.info(query)
+
+        self.__open()
+        try:
+            self.__session.execute(query, values)
+        except Exception as e:
+            logging.critical("Failed to update data, Exception: %s" % str(e))
+            self.__connection.rollback()
+        else:
+            self.__connection.commit()
+            updatedRows = self.__session.rowcount
+        finally:
+            self.__close()
+
+        return updatedRows
 
     def delete(self, tablename, where=None, *args):
         
@@ -91,7 +126,9 @@ class Database(object):
 
         if where:
             query += ' WHERE %s' % where
-        
+        else:
+            logging.critical("MySQL update requires WHERE clause")
+            sys.exit(1)
 
         logging.info(query)
 
@@ -108,9 +145,3 @@ class Database(object):
             self.__close()
 
         return deletedRows
-
-
-class FileReader(object):
-
-    pass
-        
